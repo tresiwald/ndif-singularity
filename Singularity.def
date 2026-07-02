@@ -70,18 +70,24 @@ YAML
 
     case "${1:-serve}" in
         serve)
-            shift || true
+            if [ "$#" -gt 0 ]; then
+                shift
+            fi
             if [ -n "${RAY_ADDRESS:-}" ]; then
                 exec ndif start "$NDIF_SERVICE" --verbose --worker --ray-address "$RAY_ADDRESS" "$@"
             fi
             exec ndif start "$NDIF_SERVICE" --verbose "$@"
             ;;
         load)
-            shift || true
+            if [ "$#" -gt 0 ]; then
+                shift
+            fi
             exec python /opt/ndif/load_hf_model.py "$@"
             ;;
         shell)
-            shift || true
+            if [ "$#" -gt 0 ]; then
+                shift
+            fi
             exec /bin/bash "$@"
             ;;
         *)
@@ -101,18 +107,18 @@ PY
 
 %help
     Build:
-        apptainer build ndif-gpt2.sif Singularity.def
+        singularity build ndif-gpt2.sif Singularity.def
 
     Start the NDIF all-in-one service with GPT-2 deployed:
-        apptainer run --nv \
+        singularity run --nv \
           --bind "$HOME/.cache/huggingface:$HOME/.cache/huggingface" \
           ndif-gpt2.sif
 
     Smoke-load GPT-2 directly with Transformers:
-        apptainer run --nv ndif-gpt2.sif load
+        singularity run --nv ndif-gpt2.sif load
 
     Use another Hugging Face model:
-        HF_MODEL=openai-community/gpt2 apptainer run --nv ndif-gpt2.sif
+        HF_MODEL=openai-community/gpt2 singularity run --nv ndif-gpt2.sif
 
     Main ports:
         5001  NDIF API

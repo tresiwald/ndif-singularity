@@ -24,15 +24,15 @@ sudo dnf install -y fuse-devel fuse3-devel pkgconfig
 On macOS, Singularity/Apptainer is normally run inside a Linux VM because it depends on Linux kernel features.
 
 ```bash
-apptainer build ndif-gpt2.sif Singularity.def
+singularity build ndif-gpt2.sif Singularity.def
 ```
 
-Use `singularity build ...` if your cluster still uses SingularityCE.
+Use `apptainer build ...` if your cluster uses Apptainer instead.
 
 ## Run NDIF
 
 ```bash
-apptainer run --nv \
+singularity run --nv \
   --bind "$HOME/.cache/huggingface:$HOME/.cache/huggingface" \
   ndif-gpt2.sif
 ```
@@ -60,20 +60,20 @@ The important ports match the Docker image:
 To verify the image can load a Hugging Face model without starting the service:
 
 ```bash
-apptainer run --nv ndif-gpt2.sif load
+singularity run --nv ndif-gpt2.sif load
 ```
 
 ## Use Another Model
 
 ```bash
-HF_MODEL=openai-community/gpt2 apptainer run --nv ndif-gpt2.sif
+HF_MODEL=openai-community/gpt2 singularity run --nv ndif-gpt2.sif
 ```
 
 For gated models, pass `HF_TOKEN` and bind your Hugging Face cache:
 
 ```bash
 HF_TOKEN=hf_... HF_MODEL=meta-llama/Llama-3.1-8B-Instruct \
-  apptainer run --nv \
+  singularity run --nv \
   --bind "$HOME/.cache/huggingface:$HOME/.cache/huggingface" \
   ndif-gpt2.sif
 ```
