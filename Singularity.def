@@ -17,7 +17,7 @@ From: ndif/ndif:latest
     export HF_HOME="${HF_HOME:-$HOME/.cache/huggingface}"
     export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$HF_HOME/hub}"
     export NDIF_SESSION_ROOT="${NDIF_SESSION_ROOT:-$HOME/.ndif/sessions}"
-    export NDIF_RAY_TEMP_DIR="${NDIF_RAY_TEMP_DIR:-$HOME/.ndif/ray}"
+    export NDIF_RAY_TEMP_DIR="${NDIF_RAY_TEMP_DIR:-/tmp/ndif-ray}"
 
 %post
     set -eux
@@ -66,7 +66,7 @@ YAML
     export HF_HOME="${HF_HOME:-$HOME/.cache/huggingface}"
     export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$HF_HOME/hub}"
     export NDIF_SESSION_ROOT="${NDIF_SESSION_ROOT:-$HOME/.ndif/sessions}"
-    export NDIF_RAY_TEMP_DIR="${NDIF_RAY_TEMP_DIR:-$HOME/.ndif/ray}"
+    export NDIF_RAY_TEMP_DIR="${NDIF_RAY_TEMP_DIR:-/tmp/ndif-ray}"
 
     mkdir -p "$HF_HOME" "$NDIF_SESSION_ROOT" "$NDIF_RAY_TEMP_DIR" "$HOME/.ndif/data"
 
