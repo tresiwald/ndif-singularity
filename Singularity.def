@@ -1,0 +1,120 @@
+Bootstrap: docker
+From: ndif/ndif:latest
+
+%labels
+    Author ndif-container
+    BaseImage ndif/ndif:latest
+    Description NDIF all-in-one Singularity image with a default Hugging Face GPT-2 deployment
+
+%environment
+    export NDIF_SERVICE="${NDIF_SERVICE:-all}"
+    export NDIF_DEV_MODE="${NDIF_DEV_MODE:-true}"
+    export NDIF_API_PORT="${NDIF_API_PORT:-5001}"
+    export NDIF_OBJECT_STORE_PORT="${NDIF_OBJECT_STORE_PORT:-27018}"
+    export NDIF_RAY_DASHBOARD_PORT="${NDIF_RAY_DASHBOARD_PORT:-8265}"
+    export HF_MODEL="${HF_MODEL:-gpt2}"
+    export NDIF_DEPLOYMENTS="${NDIF_DEPLOYMENTS:-$HF_MODEL}"
+    export HF_HOME="${HF_HOME:-$HOME/.cache/huggingface}"
+    export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$HF_HOME/hub}"
+    export NDIF_SESSION_ROOT="${NDIF_SESSION_ROOT:-$HOME/.ndif/sessions}"
+
+%post
+    set -eux
+
+    mkdir -p /opt/ndif
+
+    cat >/opt/ndif/load_hf_model.py <<'PY'
+import os
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+model_name = os.environ.get("HF_MODEL") or os.environ.get("NDIF_DEPLOYMENTS") or "gpt2"
+cache_dir = os.environ.get("HF_HOME")
+
+print(f"Loading Hugging Face model: {model_name}")
+print(f"HF_HOME: {cache_dir or '<transformers default>'}")
+
+tokenizer = AutoTokenizer.from_pretrained(model_name, cache_dir=cache_dir)
+model = AutoModelForCausalLM.from_pretrained(model_name, cache_dir=cache_dir)
+model.eval()
+
+prompt = os.environ.get("HF_PROMPT", "Hello from NDIF")
+inputs = tokenizer(prompt, return_tensors="pt")
+
+with torch.no_grad():
+    output_ids = model.generate(**inputs, max_new_tokens=8, do_sample=False)
+
+print(tokenizer.decode(output_ids[0], skip_special_tokens=True))
+PY
+
+    cat >/opt/ndif/models.yaml <<'YAML'
+models:
+  - gpt2
+YAML
+
+%runscript
+    set -e
+
+    export NDIF_SERVICE="${NDIF_SERVICE:-all}"
+    export NDIF_DEV_MODE="${NDIF_DEV_MODE:-true}"
+    export NDIF_API_PORT="${NDIF_API_PORT:-5001}"
+    export NDIF_OBJECT_STORE_PORT="${NDIF_OBJECT_STORE_PORT:-27018}"
+    export NDIF_RAY_DASHBOARD_PORT="${NDIF_RAY_DASHBOARD_PORT:-8265}"
+    export HF_MODEL="${HF_MODEL:-gpt2}"
+    export NDIF_DEPLOYMENTS="${NDIF_DEPLOYMENTS:-$HF_MODEL}"
+    export HF_HOME="${HF_HOME:-$HOME/.cache/huggingface}"
+    export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$HF_HOME/hub}"
+    export NDIF_SESSION_ROOT="${NDIF_SESSION_ROOT:-$HOME/.ndif/sessions}"
+
+    mkdir -p "$HF_HOME" "$NDIF_SESSION_ROOT" "$HOME/.ndif/data"
+
+    case "${1:-serve}" in
+        serve)
+            shift || true
+            if [ -n "${RAY_ADDRESS:-}" ]; then
+                exec ndif start "$NDIF_SERVICE" --verbose --worker --ray-address "$RAY_ADDRESS" "$@"
+            fi
+            exec ndif start "$NDIF_SERVICE" --verbose "$@"
+            ;;
+        load)
+            shift || true
+            exec python /opt/ndif/load_hf_model.py "$@"
+            ;;
+        shell)
+            shift || true
+            exec /bin/bash "$@"
+            ;;
+        *)
+            exec "$@"
+            ;;
+    esac
+
+%test
+    python - <<'PY'
+import importlib.util
+
+for package in ("torch", "transformers", "nnsight", "ndif"):
+    assert importlib.util.find_spec(package), f"missing {package}"
+
+print("NDIF Singularity image has the expected Python packages.")
+PY
+
+%help
+    Build:
+        apptainer build ndif-gpt2.sif Singularity.def
+
+    Start the NDIF all-in-one service with GPT-2 deployed:
+        apptainer run --nv \
+          --bind "$HOME/.cache/huggingface:$HOME/.cache/huggingface" \
+          ndif-gpt2.sif
+
+    Smoke-load GPT-2 directly with Transformers:
+        apptainer run --nv ndif-gpt2.sif load
+
+    Use another Hugging Face model:
+        HF_MODEL=openai-community/gpt2 apptainer run --nv ndif-gpt2.sif
+
+    Main ports:
+        5001  NDIF API
+        27018 MinIO object store
+        8265  Ray dashboard
