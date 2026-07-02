@@ -18,6 +18,7 @@ From: ndif/ndif:latest
     export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$HF_HOME/hub}"
     export NDIF_SESSION_ROOT="${NDIF_SESSION_ROOT:-$HOME/.ndif/sessions}"
     export NDIF_RAY_TEMP_DIR="${NDIF_RAY_TEMP_DIR:-/tmp/ndif-ray}"
+    export TIMEOUT_FOR_SPECIFIC_SERVER_S="${TIMEOUT_FOR_SPECIFIC_SERVER_S:-300}"
 
 %post
     set -eux
@@ -67,6 +68,7 @@ YAML
     export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$HF_HOME/hub}"
     export NDIF_SESSION_ROOT="${NDIF_SESSION_ROOT:-$HOME/.ndif/sessions}"
     export NDIF_RAY_TEMP_DIR="${NDIF_RAY_TEMP_DIR:-/tmp/ndif-ray}"
+    export TIMEOUT_FOR_SPECIFIC_SERVER_S="${TIMEOUT_FOR_SPECIFIC_SERVER_S:-300}"
 
     mkdir -p "$HF_HOME" "$NDIF_SESSION_ROOT" "$NDIF_RAY_TEMP_DIR" "$HOME/.ndif/data"
 

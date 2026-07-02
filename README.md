@@ -47,6 +47,7 @@ HF_MODEL=gpt2
 NDIF_DEPLOYMENTS=gpt2
 HF_HOME=$HOME/.cache/huggingface
 NDIF_RAY_TEMP_DIR=/tmp/ndif-ray
+TIMEOUT_FOR_SPECIFIC_SERVER_S=300
 ```
 
 The important ports match the Docker image:
@@ -57,10 +58,18 @@ The important ports match the Docker image:
 8265   Ray dashboard
 ```
 
-If Ray fails during startup with `Starting Ray client server failed`, inspect the Ray client log:
+If Ray fails during startup with `Starting Ray client server failed`, collect the Ray logs:
 
 ```bash
-find "$PWD/ray-tmp" -name 'ray_client_server_*.err' -print -exec tail -n 80 {} \;
+find "$PWD/ray-tmp" -type f \( \
+  -name 'ray_client_server_*.err' -o \
+  -name 'ray_client_server_*.out' -o \
+  -name 'raylet.err' -o \
+  -name 'raylet.out' -o \
+  -name 'gcs_server.err' -o \
+  -name 'gcs_server.out' -o \
+  -name 'dashboard_agent.log' \
+\) -print -exec tail -n 120 {} \;
 ```
 
 ## Smoke-load GPT-2
