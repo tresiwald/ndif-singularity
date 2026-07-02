@@ -45,6 +45,7 @@ NDIF_DEV_MODE=true
 HF_MODEL=gpt2
 NDIF_DEPLOYMENTS=gpt2
 HF_HOME=$HOME/.cache/huggingface
+NDIF_RAY_TEMP_DIR=$HOME/.ndif/ray
 ```
 
 The important ports match the Docker image:
@@ -53,6 +54,12 @@ The important ports match the Docker image:
 5001   NDIF API
 27018  MinIO object store
 8265   Ray dashboard
+```
+
+If Ray fails during startup with `Starting Ray client server failed`, inspect the Ray client log:
+
+```bash
+find "$HOME/.ndif/ray" -name 'ray_client_server_*.err' -print -exec tail -n 80 {} \;
 ```
 
 ## Smoke-load GPT-2
