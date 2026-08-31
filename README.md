@@ -2,6 +2,29 @@
 
 An Apptainer/Singularity definition that runs the upstream `ndif/ndif:latest` Docker image as an HPC-friendly image. It deploys **Qwen/Qwen3.5-4B** and **Qwen/Qwen3.5-2B**, caps the reasoning ("thinking") budget at **20,000 tokens**, generates a **persistent API key** on first run, and uses **all available GPUs and CPUs** for parallelization (Ray picks them up via `RAY_NUM_CPUS`/`RAY_NUM_GPUS`, which the runscript sets from `nproc` and `nvidia-smi`).
 
+## Quick start
+
+```bash
+# 1. Build the image (on a Linux host or cluster build node)
+singularity build ndif-qwen35.sif Singularity.def
+
+# 2. Start the service — deploys both Qwen3.5 models, uses every GPU/CPU
+singularity run --nv \
+  --bind "$HOME/.cache/huggingface:$HOME/.cache/huggingface" \
+  --bind "$PWD/ray-tmp:/tmp/ndif-ray" \
+  ndif-qwen35.sif
+
+# 3. In another shell: get the API key (generated on first run, then stable)
+singularity run ndif-qwen35.sif apikey
+
+# 4. Verify the deployment
+python test_ndif_qwen.py --api-key "$(singularity run ndif-qwen35.sif apikey)"
+```
+
+The key is also printed in the service's startup log (`NDIF API key: ...`) and stored in `$HOME/.ndif/api_key` — `cat` that file works too. To use your own key instead, export `NDIF_API_KEY=...` before step 2.
+
+On a SLURM cluster, run step 2 inside your job allocation (e.g. `srun --gres=gpu:4 ... singularity run --nv ...`); the container automatically sizes Ray to the CPUs/GPUs the job sees.
+
 ## Build
 
 ```bash
