@@ -4,79 +4,139 @@ From: ndif/ndif:latest
 %labels
     Author ndif-container
     BaseImage ndif/ndif:latest
-    Description NDIF all-in-one Singularity image with a default Hugging Face GPT-2 deployment
+    Description NDIF all-in-one Singularity image deploying Qwen/Qwen3.5-4B and Qwen/Qwen3.5-2B
 
 %environment
     export NDIF_SERVICE="${NDIF_SERVICE:-all}"
-    export NDIF_DEV_MODE="${NDIF_DEV_MODE:-true}"
+    export NDIF_DEV_MODE="${NDIF_DEV_MODE:-false}"
     export NDIF_API_PORT="${NDIF_API_PORT:-5001}"
     export NDIF_OBJECT_STORE_PORT="${NDIF_OBJECT_STORE_PORT:-27018}"
     export NDIF_RAY_DASHBOARD_PORT="${NDIF_RAY_DASHBOARD_PORT:-8265}"
-    export HF_MODEL="${HF_MODEL:-gpt2}"
-    export NDIF_DEPLOYMENTS="${NDIF_DEPLOYMENTS:-$HF_MODEL}"
+    # Comma-separated list of models to deploy.
+    export NDIF_MODELS="${NDIF_MODELS:-Qwen/Qwen3.5-4B,Qwen/Qwen3.5-2B}"
+    export NDIF_DEPLOYMENTS="${NDIF_DEPLOYMENTS:-$NDIF_MODELS}"
+    # Cap the reasoning/"thinking" budget for Qwen3.5 generation.
+    export NDIF_MAX_THINKING_TOKENS="${NDIF_MAX_THINKING_TOKENS:-20000}"
     export HF_HOME="${HF_HOME:-$HOME/.cache/huggingface}"
     export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$HF_HOME/hub}"
     export NDIF_SESSION_ROOT="${NDIF_SESSION_ROOT:-$HOME/.ndif/sessions}"
     export NDIF_RAY_TEMP_DIR="${NDIF_RAY_TEMP_DIR:-/tmp/ndif-ray}"
-    export TIMEOUT_FOR_SPECIFIC_SERVER_S="${TIMEOUT_FOR_SPECIFIC_SERVER_S:-300}"
+    export NDIF_API_KEY_FILE="${NDIF_API_KEY_FILE:-$HOME/.ndif/api_key}"
+    export TIMEOUT_FOR_SPECIFIC_SERVER_S="${TIMEOUT_FOR_SPECIFIC_SERVER_S:-600}"
 
 %post
     set -eux
 
     mkdir -p /opt/ndif
 
-    cat >/opt/ndif/load_hf_model.py <<'PY'
+    cat >/opt/ndif/load_hf_models.py <<'PY'
 import os
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-model_name = os.environ.get("HF_MODEL") or os.environ.get("NDIF_DEPLOYMENTS") or "gpt2"
+models = [
+    m.strip()
+    for m in (os.environ.get("NDIF_MODELS") or "Qwen/Qwen3.5-4B,Qwen/Qwen3.5-2B").split(",")
+    if m.strip()
+]
 cache_dir = os.environ.get("HF_HOME")
+max_thinking = int(os.environ.get("NDIF_MAX_THINKING_TOKENS", "20000"))
 
-print(f"Loading Hugging Face model: {model_name}")
 print(f"HF_HOME: {cache_dir or '<transformers default>'}")
 
-tokenizer = AutoTokenizer.from_pretrained(model_name, cache_dir=cache_dir)
-model = AutoModelForCausalLM.from_pretrained(model_name, cache_dir=cache_dir)
-model.eval()
+for model_name in models:
+    print(f"Loading Hugging Face model: {model_name}")
+    tokenizer = AutoTokenizer.from_pretrained(model_name, cache_dir=cache_dir)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        cache_dir=cache_dir,
+        dtype="auto",
+        device_map="auto" if torch.cuda.is_available() else None,
+    )
+    model.eval()
 
-prompt = os.environ.get("HF_PROMPT", "Hello from NDIF")
-inputs = tokenizer(prompt, return_tensors="pt")
+    # Persist the thinking budget into the model's generation config so every
+    # deployment picks it up without per-request overrides.
+    if hasattr(model, "generation_config"):
+        model.generation_config.max_thinking_tokens = max_thinking
 
-with torch.no_grad():
-    output_ids = model.generate(**inputs, max_new_tokens=8, do_sample=False)
-
-print(tokenizer.decode(output_ids[0], skip_special_tokens=True))
+    prompt = os.environ.get("HF_PROMPT", "Hello from NDIF")
+    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+    with torch.no_grad():
+        output_ids = model.generate(**inputs, max_new_tokens=8, do_sample=False)
+    print(tokenizer.decode(output_ids[0], skip_special_tokens=True))
+    del model
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 PY
 
     cat >/opt/ndif/models.yaml <<'YAML'
 models:
-  - gpt2
+  - Qwen/Qwen3.5-4B
+  - Qwen/Qwen3.5-2B
+generation:
+  max_thinking_tokens: 20000
 YAML
+
+    cat >/opt/ndif/make_api_key.sh <<'SH'
+#!/bin/sh
+# Generate (or reuse) an NDIF API key and print it.
+set -e
+key_file="${NDIF_API_KEY_FILE:-$HOME/.ndif/api_key}"
+mkdir -p "$(dirname "$key_file")"
+if [ ! -s "$key_file" ]; then
+    umask 077
+    key="ndif-$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+    printf '%s\n' "$key" > "$key_file"
+fi
+cat "$key_file"
+SH
+    chmod +x /opt/ndif/make_api_key.sh
 
 %runscript
     set -e
 
     export NDIF_SERVICE="${NDIF_SERVICE:-all}"
-    export NDIF_DEV_MODE="${NDIF_DEV_MODE:-true}"
+    export NDIF_DEV_MODE="${NDIF_DEV_MODE:-false}"
     export NDIF_API_PORT="${NDIF_API_PORT:-5001}"
     export NDIF_OBJECT_STORE_PORT="${NDIF_OBJECT_STORE_PORT:-27018}"
     export NDIF_RAY_DASHBOARD_PORT="${NDIF_RAY_DASHBOARD_PORT:-8265}"
-    export HF_MODEL="${HF_MODEL:-gpt2}"
-    export NDIF_DEPLOYMENTS="${NDIF_DEPLOYMENTS:-$HF_MODEL}"
+    export NDIF_MODELS="${NDIF_MODELS:-Qwen/Qwen3.5-4B,Qwen/Qwen3.5-2B}"
+    export NDIF_DEPLOYMENTS="${NDIF_DEPLOYMENTS:-$NDIF_MODELS}"
+    export NDIF_MAX_THINKING_TOKENS="${NDIF_MAX_THINKING_TOKENS:-20000}"
     export HF_HOME="${HF_HOME:-$HOME/.cache/huggingface}"
     export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$HF_HOME/hub}"
     export NDIF_SESSION_ROOT="${NDIF_SESSION_ROOT:-$HOME/.ndif/sessions}"
     export NDIF_RAY_TEMP_DIR="${NDIF_RAY_TEMP_DIR:-/tmp/ndif-ray}"
-    export TIMEOUT_FOR_SPECIFIC_SERVER_S="${TIMEOUT_FOR_SPECIFIC_SERVER_S:-300}"
+    export NDIF_API_KEY_FILE="${NDIF_API_KEY_FILE:-$HOME/.ndif/api_key}"
+    export TIMEOUT_FOR_SPECIFIC_SERVER_S="${TIMEOUT_FOR_SPECIFIC_SERVER_S:-600}"
 
     mkdir -p "$HF_HOME" "$NDIF_SESSION_ROOT" "$NDIF_RAY_TEMP_DIR" "$HOME/.ndif/data"
+
+    # API key: generate one on first run, reuse afterwards.
+    export NDIF_API_KEY="${NDIF_API_KEY:-$(/opt/ndif/make_api_key.sh)}"
+
+    # Use every CPU and GPU the host exposes.
+    NPROC="$(nproc)"
+    export OMP_NUM_THREADS="${OMP_NUM_THREADS:-$NPROC}"
+    export MKL_NUM_THREADS="${MKL_NUM_THREADS:-$NPROC}"
+    export RAY_NUM_CPUS="${RAY_NUM_CPUS:-$NPROC}"
+    if command -v nvidia-smi >/dev/null 2>&1; then
+        NGPUS="$(nvidia-smi --list-gpus | wc -l)"
+    else
+        NGPUS=0
+    fi
+    export RAY_NUM_GPUS="${RAY_NUM_GPUS:-$NGPUS}"
+    unset CUDA_VISIBLE_DEVICES 2>/dev/null || true
 
     case "${1:-serve}" in
         serve)
             if [ "$#" -gt 0 ]; then
                 shift
             fi
+            echo "NDIF API key: $NDIF_API_KEY (stored in $NDIF_API_KEY_FILE)"
+            echo "Deploying models: $NDIF_DEPLOYMENTS"
+            echo "Resources: $RAY_NUM_CPUS CPUs, $RAY_NUM_GPUS GPUs; thinking budget: $NDIF_MAX_THINKING_TOKENS tokens"
             if [ -n "${RAY_ADDRESS:-}" ]; then
                 exec ndif start "$NDIF_SERVICE" --verbose --worker --ray-address "$RAY_ADDRESS" "$@"
             fi
@@ -86,7 +146,10 @@ YAML
             if [ "$#" -gt 0 ]; then
                 shift
             fi
-            exec python /opt/ndif/load_hf_model.py "$@"
+            exec python /opt/ndif/load_hf_models.py "$@"
+            ;;
+        apikey)
+            exec /opt/ndif/make_api_key.sh
             ;;
         shell)
             if [ "$#" -gt 0 ]; then
@@ -111,18 +174,18 @@ PY
 
 %help
     Build:
-        singularity build ndif-gpt2.sif Singularity.def
+        singularity build ndif-qwen35.sif Singularity.def
 
-    Start the NDIF all-in-one service with GPT-2 deployed:
+    Start NDIF with Qwen3.5-4B and Qwen3.5-2B deployed (all GPUs/CPUs used):
         singularity run --nv \
           --bind "$HOME/.cache/huggingface:$HOME/.cache/huggingface" \
-          ndif-gpt2.sif
+          ndif-qwen35.sif
 
-    Smoke-load GPT-2 directly with Transformers:
-        singularity run --nv ndif-gpt2.sif load
+    Print (or generate) the API key:
+        singularity run ndif-qwen35.sif apikey
 
-    Use another Hugging Face model:
-        HF_MODEL=openai-community/gpt2 singularity run --nv ndif-gpt2.sif
+    Smoke-load both models directly with Transformers:
+        singularity run --nv ndif-qwen35.sif load
 
     Main ports:
         5001  NDIF API

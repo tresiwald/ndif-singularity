@@ -1,33 +1,16 @@
-# NDIF Singularity Container
+# NDIF Singularity Container — Qwen3.5
 
-This workspace contains a draft Apptainer/Singularity definition for running the upstream `ndif/ndif:latest` Docker image as an HPC-friendly Singularity image. It defaults to loading/deploying the Hugging Face `gpt2` model.
+An Apptainer/Singularity definition that runs the upstream `ndif/ndif:latest` Docker image as an HPC-friendly image. It deploys **Qwen/Qwen3.5-4B** and **Qwen/Qwen3.5-2B**, caps the reasoning ("thinking") budget at **20,000 tokens**, generates a **persistent API key** on first run, and uses **all available GPUs and CPUs** for parallelization (Ray picks them up via `RAY_NUM_CPUS`/`RAY_NUM_GPUS`, which the runscript sets from `nproc` and `nvidia-smi`).
 
 ## Build
 
-If you are compiling SingularityCE/Apptainer from source and see:
-
-```text
-fuse / fuse3 (libfuse / libfuse3) headers are required to build squashfuse
-```
-
-install the FUSE development headers on the host before rerunning the Singularity setup:
-
 ```bash
-# Debian/Ubuntu
-sudo apt-get update
-sudo apt-get install -y libfuse-dev libfuse3-dev fuse3 pkg-config
-
-# RHEL/CentOS/Rocky/Alma/Fedora
-sudo dnf install -y fuse-devel fuse3-devel pkgconfig
-```
-
-On macOS, Singularity/Apptainer is normally run inside a Linux VM because it depends on Linux kernel features.
-
-```bash
-singularity build ndif-gpt2.sif Singularity.def
+singularity build ndif-qwen35.sif Singularity.def
 ```
 
 Use `apptainer build ...` if your cluster uses Apptainer instead.
+
+If building Singularity/Apptainer from source complains about missing FUSE headers, install `libfuse-dev libfuse3-dev fuse3 pkg-config` (Debian/Ubuntu) or `fuse-devel fuse3-devel pkgconfig` (RHEL-family). On macOS run it inside a Linux VM.
 
 ## Run NDIF
 
@@ -35,79 +18,76 @@ Use `apptainer build ...` if your cluster uses Apptainer instead.
 singularity run --nv \
   --bind "$HOME/.cache/huggingface:$HOME/.cache/huggingface" \
   --bind "$PWD/ray-tmp:/tmp/ndif-ray" \
-  ndif-gpt2.sif
+  ndif-qwen35.sif
 ```
 
-The runscript starts the same all-in-one service as the Docker image and sets:
+On startup the runscript prints the deployed models, the detected CPU/GPU counts, and the API key. Defaults set by the container:
 
 ```bash
 NDIF_SERVICE=all
-NDIF_DEV_MODE=true
-HF_MODEL=gpt2
-NDIF_DEPLOYMENTS=gpt2
-HF_HOME=$HOME/.cache/huggingface
-NDIF_RAY_TEMP_DIR=/tmp/ndif-ray
-TIMEOUT_FOR_SPECIFIC_SERVER_S=300
+NDIF_DEV_MODE=false                 # real API key required
+NDIF_MODELS=Qwen/Qwen3.5-4B,Qwen/Qwen3.5-2B
+NDIF_MAX_THINKING_TOKENS=20000
+NDIF_API_KEY_FILE=$HOME/.ndif/api_key
+RAY_NUM_CPUS=$(nproc)
+RAY_NUM_GPUS=$(nvidia-smi --list-gpus | wc -l)
 ```
 
-The important ports match the Docker image:
+Ports match the Docker image: `5001` NDIF API, `27018` MinIO object store, `8265` Ray dashboard.
 
-```text
-5001   NDIF API
-27018  MinIO object store
-8265   Ray dashboard
-```
+## API key
 
-If Ray fails during startup with `Starting Ray client server failed`, collect the Ray logs:
+A key is generated on first run and stored (mode 600) in `$HOME/.ndif/api_key`. Print or pre-generate it with:
 
 ```bash
-find "$PWD/ray-tmp" -type f \( \
-  -name 'ray_client_server_*.err' -o \
-  -name 'ray_client_server_*.out' -o \
-  -name 'raylet.err' -o \
-  -name 'raylet.out' -o \
-  -name 'gcs_server.err' -o \
-  -name 'gcs_server.out' -o \
-  -name 'dashboard_agent.log' \
-\) -print -exec tail -n 120 {} \;
+singularity run ndif-qwen35.sif apikey
 ```
 
-## Smoke-load GPT-2
+Override it by exporting `NDIF_API_KEY` before `singularity run`.
 
-To verify the image can load a Hugging Face model without starting the service:
+## Thinking budget
+
+`NDIF_MAX_THINKING_TOKENS` (default 20000) caps Qwen3.5's reasoning tokens; the smoke loader also writes `max_thinking_tokens` into each model's generation config so all deployments respect it. Override at run time:
 
 ```bash
-singularity run --nv ndif-gpt2.sif load
+NDIF_MAX_THINKING_TOKENS=10000 singularity run --nv ndif-qwen35.sif
 ```
 
-## Use Another Model
+## Smoke-load the models
+
+Loads both Qwen models with plain Transformers (no service):
 
 ```bash
-HF_MODEL=openai-community/gpt2 singularity run --nv ndif-gpt2.sif
+singularity run --nv ndif-qwen35.sif load
 ```
 
-For gated models, pass `HF_TOKEN` and bind your Hugging Face cache:
+For gated models pass `HF_TOKEN` and bind your Hugging Face cache.
+
+## Client checks
+
+Minimal smoke test (single layer-0 trace on the vertical-asymptote test problem):
 
 ```bash
-HF_TOKEN=hf_... HF_MODEL=meta-llama/Llama-3.1-8B-Instruct \
-  singularity run --nv \
-  --bind "$HOME/.cache/huggingface:$HOME/.cache/huggingface" \
-  ndif-gpt2.sif
+python test_ndif_qwen.py --api-key "$(singularity run ndif-qwen35.sif apikey)"
 ```
 
-## Client Check
+Internals + layerwise uncertainty features with nnsight (per-layer hidden states, attention outputs, and logit-lens entropy / confidence / top-1–top-2 margin):
 
-Once the service is running:
-
-```python
-import nnsight
-
-nnsight.CONFIG.API.HOST = "http://localhost:5001"
-nnsight.CONFIG.set_default_api_key("any-key-works-in-dev-mode")
-
-model = nnsight.LanguageModel("gpt2")
-with model.trace("Hello world", remote=True):
-    h6 = model.transformer.h[6].output[0].save()
-
-print(h6.shape)
+```bash
+python example_qwen_internals.py --api-key "$(singularity run ndif-qwen35.sif apikey)"
 ```
+
+Both default to `Qwen/Qwen3.5-4B`; pass `--model Qwen/Qwen3.5-2B` for the smaller model. The default prompt in both is the test problem:
+
+> Find the number of vertical asymptotes in the graph of
+> y = ((x+8)(x+5)²(x+1)³x⁵(x−3)²) / ((x+7)(x+5)²(x+1)x(x−3)³(x−4)).
+
+## Debugging Ray
+
+If Ray fails during startup (`Starting Ray client server failed`), run:
+
+```bash
+bash diagnose_ndif.sh
+```
+
+or tail `ray_client_server_*.err/out`, `raylet.err/out`, `gcs_server.err/out`, and `dashboard_agent.log` under your bound `ray-tmp` directory.
