@@ -99,8 +99,7 @@ def main() -> None:
     for p, idx in zip(top.values[0], top.indices[0]):
         print(f"  {model.tokenizer.decode(idx)!r}: {p.item():.4f}")
 
-    # Example downstream feature vector: layerwise uncertainty profile, useful
-    # as input to hallucination/uncertainty probes.
+    # Example downstream feature vector: layerwise uncertainty profile
     profile = torch.stack([torch.stack(entropies).squeeze(), torch.stack(max_probs).squeeze()])
     print(f"\nUncertainty feature matrix shape (2 x n_layers): {tuple(profile.shape)}")
 
