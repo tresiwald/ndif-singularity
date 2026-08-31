@@ -9,10 +9,6 @@ This script uses nnsight to pull, in a single remote trace:
     hidden state is projected through the final norm + LM head, and we compute
     predictive entropy, max-probability (confidence), and the top-1/top-2
     probability margin for the last token position.
-
-Run the container first, then:
-
-    python example_qwen_internals.py --api-key "$(singularity run ndif-qwen35.sif apikey)"
 """
 
 from __future__ import annotations
